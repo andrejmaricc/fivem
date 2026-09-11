@@ -9,13 +9,11 @@ game: gta5
 char* GET_BLIP_DISPLAY_NAME(Blip blip);
 ```
 
-Experimental custom-client native for GTA V Legacy build 3570.
 Reads the current name using GTA's internal blip-name function, including
 names assigned by other resources. No registration by the creating resource
-is required. This native is not part of the stock FiveM client.
+is required.
 
-The intended behavior is a custom name when assigned, otherwise GTA's
-localized default name. Runtime validation is required before deployment.
+Returns a custom name when assigned, otherwise GTA's localized default name.
 Formatting codes are preserved; render the result as text in NUI, not HTML.
 The result does not include pause-map category headings or grouped counts.
 

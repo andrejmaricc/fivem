@@ -7,10 +7,32 @@
 #include <CrossBuildRuntime.h>
 #include <Hooking.h>
 #include <ScriptEngine.h>
-#include <BlipHandleResolver.h>
+#include <cstdint>
+#include <cstring>
 
 namespace
 {
+// GTA Legacy handles contain a 16-bit pool index and a 16-bit generation.
+// The pool stores pointers; the generation is at offset 8 in a radar blip.
+// Layout reference: ScriptHookVDotNet NativeMemory.GetBlipAddress (zlib).
+void* ResolveBlip(void* const* pool, int count, uint32_t handle)
+{
+	if (!pool || count <= 0 || count > 65536 || handle == 0)
+	{
+		return nullptr;
+	}
+
+	const uint32_t index = handle & 0xFFFF;
+	if (index >= static_cast<uint32_t>(count) || !pool[index])
+	{
+		return nullptr;
+	}
+
+	uint16_t generation;
+	std::memcpy(&generation, static_cast<const uint8_t*>(pool[index]) + 8, sizeof(generation));
+	return generation == (handle >> 16) ? pool[index] : nullptr;
+}
+
 void** g_blipPool;
 int* g_blipCount;
 const char* (*g_getBlipName)(void*);
@@ -23,23 +45,15 @@ bool IsAvailable()
 
 static HookFunction hookFunction([]()
 {
-	// Deliberately limited to the initial prototype target. Do not widen this
-	// guard until the signatures and runtime tests have passed on that build.
-	if (xbr::GetGameBuild() != 3570)
-	{
-		trace("[blip-names] Prototype requires GTA Legacy build 3570; native unavailable.\n");
-		return;
-	}
-
 	// Pool/count signatures are documented by ScriptHookVDotNet NativeMemory.
 	// Resolve the RIP-relative globals rather than hard-coding addresses.
-	// Scan without cached hints and stop at a second match, so ambiguity is
-	// detected instead of accepting the first matching address.
-	auto module = GetModuleHandle(nullptr);
-	auto pool = hook::module_pattern(module, "3B 35 ? ? ? ? 74 ? 48 81 FD").count_hint(2);
-	auto count = hook::module_pattern(module, "FF C6 49 83 C6 08 3B 35 ? ? ? ? 7C 9B").count_hint(2);
+	// Request up to two matches so multiple returned matches are
+	// rejected instead of selecting an arbitrary address.
+
+	auto pool = hook::pattern("3B 35 ? ? ? ? 74 ? 48 81 FD").count_hint(2);
+	auto count = hook::pattern("FF C6 49 83 C6 08 3B 35 ? ? ? ? 7C 9B").count_hint(2);
 	// Same name function used by gta-core-five/src/PatchBlipCategories.cpp.
-	auto name = hook::module_pattern(module, "48 83 EC ? 33 D2 38 51 ? 75").count_hint(2);
+	auto name = hook::pattern("48 83 EC ? 33 D2 38 51 ? 75").count_hint(2);
 
 	if (pool.size() != 1 || count.size() != 1 || name.size() != 1)
 	{
@@ -50,7 +64,7 @@ static HookFunction hookFunction([]()
 	g_blipPool = hook::get_address<void**>(pool.get(0).get<char>(-4));
 	g_blipCount = hook::get_address<int*>(count.get(0).get<char>(8));
 	g_getBlipName = reinterpret_cast<const char* (*)(void*)>(name.get(0).get<void>());
-	trace("[blip-names] Experimental name reader initialized for build 3570.\n");
+	trace("[blip-names] Name reader initialized for game build %d.\n", xbr::GetGameBuild());
 });
 
 static InitFunction initFunction([]()
@@ -66,7 +80,7 @@ static InitFunction initFunction([]()
 		if (IsAvailable() && context.GetArgumentCount() > 0)
 		{
 			auto handle = context.GetArgument<uint32_t>(0);
-			auto blip = blip_names::Resolve(g_blipPool, *g_blipCount, handle);
+			auto blip = ResolveBlip(g_blipPool, *g_blipCount, handle);
 			// Removed blips can retain their slot and generation. Ask GTA for
 			// liveness before its name function can fall back to the player blip.
 			auto exists = fx::ScriptEngine::GetNativeHandler(0xA6DB27D19ECBB7DA);

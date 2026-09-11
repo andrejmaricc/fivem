@@ -9,7 +9,5 @@ game: gta5
 BOOL IS_BLIP_DISPLAY_NAME_AVAILABLE();
 ```
 
-Experimental custom-client capability check. Returns true only when the
-prototype targets the current GTA build and all required signatures resolved.
-This does not certify that runtime acceptance tests have passed.
-This native is not part of the stock FiveM client.
+Returns true when the required game functions and blip pool have been resolved
+for `GET_BLIP_DISPLAY_NAME`. Returns false when initialization failed.
